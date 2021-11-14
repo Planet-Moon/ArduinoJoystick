@@ -1,8 +1,4 @@
-import pyautogui as pyag
-pyag.FAILSAFE = True
-pyag.MINIMUM_DURATION = 0
-pyag.MINIMUM_SLEEP = 0
-pyag.PAUSE = 0
+import win32api
 from serial import Serial
 import json
 import copy
@@ -54,17 +50,20 @@ class Mouse_move:
             return mouse_move
         except UnicodeDecodeError:
             return Mouse_move()
-
+        except json.JSONDecodeError:
+            return Mouse_move()
 
 
 class Mouse_controller:
     def __init__(self,input_device:Input_device):
-        self.input_device = input_device
-        self.input_device.add_connection(self.update)
-        self._running = False
-        self._calibrated = False
+        self.input_device:Input_device = input_device
+        self._running:bool = False
+        self._calibrated:bool = False
         self._calibration:Mouse_move = Mouse_move()
-        self._sw_old = None
+        self._sw_old:bool = None
+        self._cursor_position_old:tuple[int,int] = win32api.GetCursorPos()
+        self.input_device.add_connection(self.update)
+        pass
 
     @property
     def calibrated(self):
@@ -85,33 +84,46 @@ class Mouse_controller:
         retval.y = mouse_move.y - self._calibration.y
         return retval
 
-    def update(self, mouse_move):
+    def update(self, mouse_move:Mouse_move):
         if not self._calibrated:
             self._calibration = copy.copy(mouse_move)
             self._calibrated = True
             print("calibration: " + str(self._calibration))
         else:
             if mouse_move.sw == True and self._sw_old == False:
-                pyag.click()
+                # left mouse down
+                win32api.mouse_event(int("8002",16),
+                    self._cursor_position_old[0],
+                    self._cursor_position_old[1],
+                    0,0)
+            elif mouse_move.sw == False and self._sw_old == True:
+                # left mouse up
+                win32api.mouse_event(int("8004",16),
+                    self._cursor_position_old[0],
+                    self._cursor_position_old[1],
+                    0,0)
             else:
                 diff_move = self.diff_to_calibration(mouse_move)
-
-                self.move(diff_move.x,diff_move.y)
+                self._cursor_position_old = self.move(self._cursor_position_old, diff_move.x, diff_move.y)
             self._sw_old = mouse_move.sw
 
     @staticmethod
-    def move(x,y):
+    def move(last_position:tuple[int,int],x:int,y:int) -> tuple[int,int]:
         if x < 5 and x > -5:
             x = 0
         if y < 5 and y > -5:
             y = 0
         if x == 0 and y == 0:
-            return
+            return last_position
         else:
             # print("x: "+str(x)+", y: "+str(y))
             x = int(x / 15)
             y = int(y / 15)
-            pyag.move(y*-1,x) # swap x and y and invert x
+            add_value = (y*-1,x)
+            x, y = y*-1,x
+            new_position = (last_position[0]+x,last_position[1]+y)
+            win32api.SetCursorPos(new_position) # swap x and y and invert x
+            return new_position
 
     @staticmethod
     def update_cursor(command:Mouse_move):
